@@ -50,6 +50,8 @@ end
 ## Facebook Attributes
 if resource.facebook?
   json.page_id resource.channel.try(:page_id)
+  # Instagram profissional vinculado à página: as mensagens diretas chegam por esta caixa.
+  json.instagram_id resource.channel.try(:instagram_id)
   json.reauthorization_required resource.channel.try(:reauthorization_required?)
   # Hub-relayed channels carry the Hub connect link / status here. The frontend
   # uses public_link to render Reconnect against the Hub instead of the native
