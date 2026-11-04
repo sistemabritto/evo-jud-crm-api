@@ -302,16 +302,21 @@ class Message < ApplicationRecord
 
   private
 
-  # Cramer: agente "silencioso" (bot_config.private_replies_only = true) nunca fala com o
-  # contato. Toda saída dele vira nota privada, em qualquer caminho (MessageCreator,
-  # SegmentedMessageCreator, InactivityActions...). Nota privada não dispara e-mail
-  # (email_notifiable_message?) nem SendReplyJob para canais de mensagem.
+  # Cramer: agente nunca responde por e-mail, e agente "silencioso" nunca fala com o contato.
+  # Toda saída de AgentBot vira nota privada quando:
+  #  - a caixa é de e-mail (regra fixa: o serviço de agentes reescreve bot_config direto no
+  #    banco a cada edição do agente, então a flag sozinha não é garantia); ou
+  #  - bot_config.private_replies_only = true (qualquer canal).
+  # Vale para todos os caminhos (MessageCreator, SegmentedMessageCreator, InactivityActions...).
+  # Nota privada não dispara e-mail (email_notifiable_message?) nem SendReplyJob.
   def force_private_for_silent_bot
     return unless sender.is_a?(AgentBot)
     return unless %w[outgoing template].include?(message_type.to_s)
 
     config = sender.bot_config
-    self.private = true if config.is_a?(Hash) && config['private_replies_only'] == true
+    silent = config.is_a?(Hash) && config['private_replies_only'] == true
+    email_inbox = (inbox || conversation&.inbox)&.channel_type == 'Channel::Email'
+    self.private = true if silent || email_inbox
   end
 
   def prevent_message_flooding
