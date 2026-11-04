@@ -19,11 +19,15 @@ class AutomationRules::ContactActionService
 
   # Actions that operate on the contact itself and need no conversation.
   CONTACT_NATIVE_ACTIONS = %w[send_webhook_event add_label remove_label update_custom_attribute].freeze
+  # Actions that need the card itself: only available when the rule fired from a
+  # pipeline_stage_updated on a card born from a contact (no conversation).
+  PIPELINE_ITEM_ACTIONS = %w[create_pipeline_task].freeze
 
-  def initialize(rule, contact, recorder: nil)
+  def initialize(rule, contact, recorder: nil, pipeline_item: nil)
     @rule = rule
     @contact = contact
     @recorder = recorder
+    @pipeline_item = pipeline_item
   end
 
   def perform
@@ -41,6 +45,7 @@ class AutomationRules::ContactActionService
     action_name = action[:action_name]
     action_params = action[:action_params]
 
+    return run_pipeline_item_action(action_name, action_params) if @pipeline_item && PIPELINE_ITEM_ACTIONS.include?(action_name)
     return record_skip(action_name) unless CONTACT_NATIVE_ACTIONS.include?(action_name)
     return record_skip(action_name) if action_name == 'update_custom_attribute' && !contact_scoped_attribute?(action_params)
 
@@ -50,6 +55,41 @@ class AutomationRules::ContactActionService
     Rails.logger.error "Automation Rule #{@rule.id}: Error executing contact action #{action_name}: #{e.message}"
     @recorder&.add_step("Action errored: #{action_name}", level: 'error', data: { error: "#{e.class}: #{e.message}" })
     EvolutionExceptionTracker.new(e).capture_exception
+  end
+
+  def run_pipeline_item_action(action_name, action_params)
+    task = create_card_task(action_params)
+    @recorder&.add_step("Action: #{action_name}", level: 'success', data: { params: action_params, task_id: task.id })
+  rescue StandardError => e
+    Rails.logger.error "Automation Rule #{@rule.id}: Error executing card action #{action_name}: #{e.message}"
+    @recorder&.add_step("Action errored: #{action_name}", level: 'error', data: { error: "#{e.class}: #{e.message}" })
+    EvolutionExceptionTracker.new(e).capture_exception
+  end
+
+  # Same params as the conversation-scoped create_pipeline_task, applied to the
+  # card that triggered the rule instead of the conversation's first card.
+  def create_card_task(task_params)
+    params = (Array(task_params).first || {})
+    params = params.respond_to?(:with_indifferent_access) ? params.with_indifferent_access : {}
+    @pipeline_item.tasks.create!(
+      created_by_id: User.where(type: 'SuperAdmin').first&.id,
+      assigned_to_id: params[:assigned_to_id].presence,
+      title: params[:title],
+      description: params[:description],
+      task_type: params[:task_type].presence || 'other',
+      due_date: card_task_due_date(params[:due_in]),
+      priority: params[:priority].presence || 'medium'
+    )
+  end
+
+  def card_task_due_date(due_in)
+    return nil if due_in.blank?
+    return Time.zone.parse(due_in) if due_in.is_a?(String) && due_in.match?(/^\d{4}-\d{2}-\d{2}/)
+
+    value, unit = due_in.to_s.split('.')
+    return nil unless value.to_s.match?(/\A\d+\z/) && %w[minutes hours days weeks].include?(unit)
+
+    value.to_i.public_send(unit).from_now
   end
 
   def record_skip(action_name)

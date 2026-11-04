@@ -323,12 +323,12 @@ class AutomationRuleListener < BaseListener
     }
   end
 
-  def execute_contact_rule_actions(rule, contact, recorder)
+  def execute_contact_rule_actions(rule, contact, recorder, pipeline_item: nil)
     if rule.mode == 'flow' && rule.flow_data.present?
       recorder.add_step('Executing flow', data: { mode: 'flow' })
       AutomationRules::FlowExecutionService.new(rule, nil, nil, contact, recorder: recorder).perform
     else
-      AutomationRules::ContactActionService.new(rule, contact, recorder: recorder).perform
+      AutomationRules::ContactActionService.new(rule, contact, recorder: recorder, pipeline_item: pipeline_item).perform
     end
   end
 
@@ -384,7 +384,7 @@ class AutomationRuleListener < BaseListener
       return recorder.persist!
     end
 
-    execute_contact_rule_actions(rule, contact, recorder)
+    execute_contact_rule_actions(rule, contact, recorder, pipeline_item: pipeline_item)
 
     recorder.matched!
     recorder.persist!

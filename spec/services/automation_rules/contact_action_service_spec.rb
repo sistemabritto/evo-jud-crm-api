@@ -110,6 +110,33 @@ RSpec.describe AutomationRules::ContactActionService do
     end
   end
 
+  describe 'card actions (pipeline_stage_updated on a card born from a contact)' do
+    let(:tasks) { double('tasks') }
+    let(:pipeline_item) { double('pipeline_item', tasks: tasks) }
+    let(:task_action) do
+      [{ 'action_name' => 'create_pipeline_task',
+         'action_params' => [{ 'title' => 'Avisar cliente', 'task_type' => 'follow_up', 'priority' => 'high', 'due_in' => '1.days' }] }]
+    end
+
+    it 'creates the task on the card that fired the rule' do
+      allow(tasks).to receive(:create!).and_return(double(id: 'task-1'))
+      rule = build_rule(actions: task_action)
+
+      described_class.new(rule, contact, recorder: recorder, pipeline_item: pipeline_item).perform
+
+      expect(tasks).to have_received(:create!).with(hash_including(title: 'Avisar cliente', task_type: 'follow_up', priority: 'high'))
+      expect(recorder).to have_received(:add_step).with('Action: create_pipeline_task', hash_including(level: 'success'))
+    end
+
+    it 'still skips create_pipeline_task when there is no card in scope' do
+      rule = build_rule(actions: task_action)
+
+      described_class.new(rule, contact, recorder: recorder).perform
+
+      expect(recorder).to have_received(:add_step).with('Action skipped: create_pipeline_task', hash_including(level: 'warn'))
+    end
+  end
+
   describe 'robustness' do
     it 'isolates a failing action so later actions still run' do
       allow(WebhookJob).to receive(:perform_later)
