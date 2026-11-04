@@ -58,6 +58,7 @@ class Message < ApplicationRecord
   }.to_json.freeze
 
   before_validation :ensure_content_type
+  before_validation :force_private_for_silent_bot, on: :create
   before_validation :prevent_message_flooding, unless: :imported?
   before_save :ensure_processed_message_content
   before_save :ensure_in_reply_to
@@ -300,6 +301,18 @@ class Message < ApplicationRecord
   end
 
   private
+
+  # Cramer: agente "silencioso" (bot_config.private_replies_only = true) nunca fala com o
+  # contato. Toda saída dele vira nota privada, em qualquer caminho (MessageCreator,
+  # SegmentedMessageCreator, InactivityActions...). Nota privada não dispara e-mail
+  # (email_notifiable_message?) nem SendReplyJob para canais de mensagem.
+  def force_private_for_silent_bot
+    return unless sender.is_a?(AgentBot)
+    return unless %w[outgoing template].include?(message_type.to_s)
+
+    config = sender.bot_config
+    self.private = true if config.is_a?(Hash) && config['private_replies_only'] == true
+  end
 
   def prevent_message_flooding
     # Added this to cover the validation specs in messages
