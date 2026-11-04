@@ -72,7 +72,7 @@ class AutomationRules::ContactActionService
     params = (Array(task_params).first || {})
     params = params.respond_to?(:with_indifferent_access) ? params.with_indifferent_access : {}
     @pipeline_item.tasks.create!(
-      created_by_id: User.where(type: 'SuperAdmin').first&.id,
+      created_by_id: PipelineTask.automation_author_id(params[:assigned_to_id]),
       assigned_to_id: params[:assigned_to_id].presence,
       title: params[:title],
       description: params[:description],

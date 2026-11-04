@@ -79,6 +79,15 @@ class PipelineTask < ApplicationRecord
     urgent: 3
   }, prefix: true
 
+  # Author of a task created by an automation (no human in scope). Roles live in
+  # evo-auth, so an install may have no User of STI type SuperAdmin: fall back to
+  # the assignee, then to the oldest user, instead of failing `created_by` presence.
+  def self.automation_author_id(assigned_to_id = nil)
+    User.where(type: 'SuperAdmin').order(:created_at).pick(:id) ||
+      (assigned_to_id.presence && User.where(id: assigned_to_id).pick(:id)) ||
+      User.order(:created_at).pick(:id)
+  end
+
   # Validations
   validates :title, presence: true, length: { maximum: 255 }
   validates :task_type, presence: true
