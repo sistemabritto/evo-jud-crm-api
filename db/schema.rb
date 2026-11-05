@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_08_26_120000) do
+ActiveRecord::Schema[7.1].define(version: 2026_11_04_230000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1794,6 +1794,37 @@ ActiveRecord::Schema[7.1].define(version: 2026_08_26_120000) do
     t.string "auth_key"
     t.datetime "created_at", precision: nil, null: false
     t.datetime "updated_at", precision: nil, null: false
+  end
+
+  create_table "tracking_ad_metrics", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "platform", null: false
+    t.date "date", null: false
+    t.string "campaign_id", null: false
+    t.string "campaign_name"
+    t.bigint "spend_cents", default: 0, null: false
+    t.bigint "impressions", default: 0, null: false
+    t.bigint "clicks", default: 0, null: false
+    t.bigint "conversations", default: 0, null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["platform", "date", "campaign_id"], name: "index_tracking_ad_metrics_on_platform_and_date_and_campaign_id", unique: true
+  end
+
+  create_table "tracking_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "contact_id", null: false
+    t.uuid "conversation_id"
+    t.string "stage", null: false
+    t.datetime "occurred_at", null: false
+    t.bigint "value_cents"
+    t.string "source", default: "crm", null: false
+    t.string "external_id"
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "capi_sent_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["contact_id", "stage"], name: "index_tracking_events_on_contact_id_and_stage", unique: true
+    t.index ["stage", "occurred_at"], name: "index_tracking_events_on_stage_and_occurred_at"
   end
 
   create_table "user_roles", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|

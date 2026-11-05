@@ -139,6 +139,8 @@ class Message < ApplicationRecord
   after_create_commit :execute_after_create_commit_callbacks, unless: :imported?
   after_create_commit :publish_message_created, unless: :imported?
   after_create_commit :sync_message_event, unless: :imported?
+  # evo-jud-crm: funil de tráfego (origem, conversa iniciada, link de agendamento)
+  after_create_commit :enqueue_tracking, unless: :imported?
   after_update_commit :dispatch_update_event
   after_update_commit :publish_message_updated
   after_destroy_commit :publish_message_deleted
@@ -353,6 +355,12 @@ class Message < ApplicationRecord
 
   def ensure_content_type
     self.content_type ||= Message.content_types[:text]
+  end
+
+  def enqueue_tracking
+    Tracking::MessageJob.perform_later(id)
+  rescue StandardError => e
+    Rails.logger.warn("[Tracking] message #{id}: #{e.class}")
   end
 
   def execute_after_create_commit_callbacks

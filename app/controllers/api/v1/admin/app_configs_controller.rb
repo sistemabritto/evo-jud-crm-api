@@ -65,7 +65,9 @@ module Api
           ],
           'push_notifications' => %w[FIREBASE_PROJECT_ID FIREBASE_CREDENTIALS_SECRET
                                      IOS_APP_ID ANDROID_BUNDLE_ID],
-          'frontend_runtime' => %w[RECAPTCHA_SITE_KEY CLARITY_PROJECT_ID]
+          'frontend_runtime' => %w[RECAPTCHA_SITE_KEY CLARITY_PROJECT_ID],
+          # evo-jud-crm: Configurações › Admin › Tracking (Meta, Google Ads, etapas do funil, Postiz, OpenReply)
+          'tracking' => Tracking::Config::KEYS
         }.freeze
 
         # Required-key enforcement: see `IntegrationRequirements` for the per-integration

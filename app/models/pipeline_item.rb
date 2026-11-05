@@ -77,6 +77,8 @@ class PipelineItem < ApplicationRecord
   after_create_commit :broadcast_stage_update_to_evo_flow
   after_update :create_stage_change_movement, if: :saved_change_to_pipeline_stage_id?
   after_update_commit :broadcast_stage_update_to_evo_flow, if: :saved_change_to_pipeline_stage_id?
+  # evo-jud-crm: etapa mapeada em Tracking vira marco do funil (reunião, contrato, pagamento)
+  after_commit :enqueue_tracking_stage, on: %i[create update], if: :saved_change_to_pipeline_stage_id?
   after_update :publish_pipeline_item_updated
   after_update :publish_pipeline_item_completed, if: :saved_change_to_completed_at?
   after_destroy :publish_pipeline_item_deleted
@@ -251,6 +253,13 @@ class PipelineItem < ApplicationRecord
       conversation: conversation&.webhook_data,
       contact: contact&.webhook_data
     }
+  end
+
+
+  def enqueue_tracking_stage
+    Tracking::PipelineStageJob.perform_later(id)
+  rescue StandardError => e
+    Rails.logger.warn("[Tracking] pipeline_item #{id}: #{e.class}")
   end
 
   private

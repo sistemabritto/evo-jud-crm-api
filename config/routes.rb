@@ -165,6 +165,14 @@ Rails.application.routes.draw do
 
       resources :labels, only: [:index, :show, :create, :update, :destroy], controller: 'labels'
 
+      # evo-jud-crm: funil de tráfego (painel Tráfego e conector MCP)
+      get 'tracking/funnel', to: 'tracking#funnel'
+      get 'tracking/campaigns', to: 'tracking#campaigns'
+      get 'tracking/status', to: 'tracking#status'
+      get 'tracking/links', to: 'tracking#links'
+      post 'tracking/events', to: 'tracking#create_event'
+      post 'tracking/contacts/:contact_id/origin', to: 'tracking#set_origin'
+
       resources :agent_bots, only: [:index, :create, :show, :update, :destroy], controller: 'agent_bots' do
         delete :avatar, on: :member
       end
@@ -353,6 +361,8 @@ Rails.application.routes.draw do
           post 'whatsapp/:phone_number', to: 'webhooks/whatsapp#process_payload'
           post 'whatsapp/evolution', to: 'webhooks/whatsapp#process_payload'
           post 'whatsapp/evolution_go', to: 'webhooks/whatsapp#process_evolution_go_payload'
+          # evo-jud-crm: métricas do Google Ads enviadas pelo script da conta
+          post 'tracking/google_ads', to: 'webhooks/tracking#google_ads'
           post 'whatsapp/zapi', to: 'webhooks/whatsapp#process_payload'
 
           # Telegram webhooks

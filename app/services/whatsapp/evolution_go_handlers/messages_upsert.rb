@@ -453,7 +453,23 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     attrs = { external_created_at: message_timestamp }
     attrs[:sender_name] = participant_push_name if group_message? && participant_push_name.present?
     attrs[:media_type] = evolution_go_media_type if evolution_go_media_type.present?
+    referral = ad_referral
+    attrs[:ad_referral] = referral if referral.present?
     attrs
+  end
+
+  # evo-jud-crm: anúncio de clique para WhatsApp (externalAdReply), repassado pelo Evolution Go em data.referral.
+  AD_REFERRAL_KEYS = %w[sourceType sourceID sourceURL sourceApp ctwaClid title body mediaType].freeze
+
+  def ad_referral
+    raw = @evolution_go_data.respond_to?(:[]) ? (@evolution_go_data[:referral] || @evolution_go_data['referral']) : nil
+    raw = JSON.parse(raw) if raw.is_a?(String)
+    raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
+    return nil unless raw.is_a?(Hash)
+
+    raw.stringify_keys.slice(*AD_REFERRAL_KEYS).transform_values { |v| v.to_s[0, 500] }.presence
+  rescue JSON::ParserError
+    nil
   end
 
   def configure_audio_metadata(attachment)

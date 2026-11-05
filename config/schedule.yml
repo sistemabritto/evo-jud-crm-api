@@ -102,3 +102,9 @@ whatsapp_credential_probe_scheduler_job:
   class: 'Channels::Whatsapp::CredentialProbeSchedulerJob'
   queue: low
   description: 'Re-probe token-based whatsapp credentials and refresh the verified stamp'
+
+# evo-jud-crm: métricas dos anúncios do Meta para o painel de tráfego (só roda se configurado)
+tracking_meta_insights_job:
+  cron: '20 */3 * * *'
+  class: 'Tracking::MetaInsightsJob'
+  queue: scheduled_jobs
