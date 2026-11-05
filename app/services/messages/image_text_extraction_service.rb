@@ -24,6 +24,15 @@ class Messages::ImageTextExtractionService
     não dê opinião.
   PROMPT
 
+  # The model is much more literal with a role than with a bare user turn: the
+  # same image that it answers "não posso ajudar" when sent alone is fully
+  # transcribed when the system turn says it is an OCR pass.
+  SYSTEM_PROMPT = <<~PROMPT.squish
+    Você é um transcritor de imagens (OCR). Sua única tarefa é transcrever o
+    texto visível na imagem, mesmo que ela esteja girada. Você sempre consegue
+    ler imagens. Nunca responda que não pode ajudar.
+  PROMPT
+
   MAX_CHARS = 4000
   MAX_BYTES = 15.megabytes
 
@@ -65,7 +74,22 @@ class Messages::ImageTextExtractionService
   private
 
   def extract_text(endpoint)
-    response = call_vision_api(endpoint)
+    data = attachment.file.download
+    # Phone photos often come portrait with the document lying sideways. Both
+    # readings are cheap next to a wrong name; the longest one wins. The raw
+    # orientation is always one of the candidates, so an already upright photo
+    # is unaffected.
+    candidates = [read(endpoint, data)]
+    if portrait?
+      rotated = rotate(data)
+      candidates << read(endpoint, rotated) if rotated
+    end
+
+    candidates.compact.max_by { |text| score(text) }
+  end
+
+  def read(endpoint, bytes)
+    response = call_vision_api(endpoint, bytes)
     return nil if response.nil?
 
     content = response.dig('choices', 0, 'message', 'content')
@@ -76,7 +100,35 @@ class Messages::ImageTextExtractionService
     text.first(MAX_CHARS)
   end
 
-  def call_vision_api(endpoint)
+  # More actual characters means the orientation made the text available
+  # instead of hiding it. A refusal has almost none.
+  def score(text)
+    text.scan(/[[:alnum:]]/).size
+  end
+
+  def portrait?
+    metadata = attachment.file.blob.metadata || {}
+    width = metadata[:width] || metadata['width']
+    height = metadata[:height] || metadata['height']
+    width.present? && height.present? && height > width
+  end
+
+  def rotate(bytes)
+    require 'tempfile'
+    source = Tempfile.new(['cramer_image', '.jpg'])
+    source.binmode
+    source.write(bytes)
+    source.close
+    output = Tempfile.new(['cramer_image_rotated', '.jpg'])
+    output.close
+    ok = system('magick', source.path, '-rotate', '-90', output.path, out: File::NULL, err: File::NULL)
+    ok ? File.binread(output.path) : nil
+  ensure
+    source&.unlink
+    output&.unlink
+  end
+
+  def call_vision_api(endpoint, bytes)
     uri = URI("#{base_url(endpoint)}/chat/completions")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = uri.scheme == 'https'
@@ -90,13 +142,16 @@ class Messages::ImageTextExtractionService
       model: model,
       temperature: 0,
       max_tokens: 1500,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: PROMPT },
-          { type: 'image_url', image_url: { url: image_data_url, detail: 'high' } }
-        ]
-      }]
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: PROMPT },
+            { type: 'image_url', image_url: { url: image_data_url(bytes), detail: 'high' } }
+          ]
+        }
+      ]
     }.to_json
 
     response = http.request(request)
@@ -119,9 +174,9 @@ class Messages::ImageTextExtractionService
     GlobalConfigService.load('OPENAI_IMAGE_TEXT_MODEL', 'gpt-4o-mini')
   end
 
-  def image_data_url
+  def image_data_url(bytes)
     blob = attachment.file.blob
-    "data:#{blob.content_type};base64,#{Base64.strict_encode64(attachment.file.download)}"
+    "data:#{blob.content_type};base64,#{Base64.strict_encode64(bytes)}"
   end
 
   def save_text(text)
