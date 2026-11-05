@@ -16,6 +16,8 @@ module Tracking
     HEADER = ['Google Click ID', 'Email', 'Phone Number', 'Conversion Name', 'Conversion Time',
               'Conversion Value', 'Conversion Currency'].freeze
     WINDOW = 36.hours
+    EXAMPLE = ['EXEMPLO-IGNORAR', Digest::SHA256.hexdigest('exemplo@exemplo.com'), Digest::SHA256.hexdigest('+5500000000000'),
+               'Exemplo (ignorar)', '2000-01-01 00:00:00-03:00', '0.00', 'BRL'].freeze
 
     module_function
 
@@ -35,8 +37,10 @@ module Tracking
         ev.update_columns(metadata: ev.metadata.merge('google_feed_at' => now.iso8601)) if first.blank?
         rows << row
       end
-      # Cabeçalho na 1ª linha (conexão HTTPS do Google Ads); fuso vai na própria hora.
-      CSV.generate { |c| c << HEADER; rows.each { |r| c << r } }
+      # Cabeçalho na 1ª linha (conexão HTTPS do Google Ads); fuso vai na própria hora. A linha de
+      # exemplo deixa o Google reconhecer as colunas mesmo sem conversões; cada ação de conversão no
+      # Google filtra pelo próprio nome, então o exemplo nunca é importado.
+      CSV.generate { |c| c << HEADER; c << EXAMPLE; rows.each { |r| c << r } }
     end
 
     def row_for(event)
