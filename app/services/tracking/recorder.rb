@@ -16,7 +16,7 @@ module Tracking
       event = TrackingEvent.create!(contact_id: contact.id, conversation_id: conversation&.id, stage: stage,
                                     occurred_at: occurred_at || Time.current, source: source,
                                     value_cents: value_cents, external_id: external_id, metadata: meta)
-      Tracking::CapiJob.perform_later(event.id) if Tracking::Config.meta_capi?
+      Tracking::CapiJob.perform_later(event.id) if Tracking::Config.meta_capi? && Tracking::Config.capi_contact?(contact)
       event
     rescue ActiveRecord::RecordNotUnique
       TrackingEvent.find_by(contact_id: contact.id, stage: stage)

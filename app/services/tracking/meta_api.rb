@@ -69,7 +69,8 @@ module Tracking
     end
 
     # Conversions API. Com ctwa_clid + WABA usa o modo business_messaging (atribuição do anúncio de
-    # WhatsApp); sem isso, system_generated com telefone/e-mail em hash (correspondência pelo Meta).
+    # WhatsApp), no conjunto de dados da WABA se configurado; sem isso, system_generated no pixel,
+    # com telefone/e-mail em hash (correspondência pelo Meta).
     def send_capi!(event)
       pixel = Tracking::Config.get('TRACKING_META_PIXEL_ID')
       token = Tracking::Config.capi_token
@@ -83,6 +84,10 @@ module Tracking
                user_data: user_data, custom_data: { origem: attrs['origem_canal'], campanha: attrs['origem_campanha'] }.compact }
       waba = Tracking::Config.get('TRACKING_META_WABA_ID')
       if attrs['origem_ctwa_clid'].present? && waba.present?
+        if Tracking::Config.waba_dataset
+          pixel = Tracking::Config.waba_dataset
+          token = Tracking::Config.waba_capi_token
+        end
         data[:action_source] = 'business_messaging'
         data[:messaging_channel] = 'whatsapp'
         user_data[:ctwa_clid] = attrs['origem_ctwa_clid']

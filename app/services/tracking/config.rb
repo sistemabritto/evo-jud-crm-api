@@ -7,7 +7,7 @@ module Tracking
       TRACKING_STAGE_MEETING_IDS TRACKING_STAGE_CONTRACT_IDS TRACKING_STAGE_PAYMENT_IDS
       TRACKING_META_AD_ACCOUNT_ID TRACKING_META_ACCESS_TOKEN_SECRET
       TRACKING_META_PIXEL_ID TRACKING_META_CAPI_TOKEN_SECRET TRACKING_META_CAPI_ENABLED
-      TRACKING_META_PAGE_ID TRACKING_META_WABA_ID TRACKING_META_TEST_EVENT_CODE
+      TRACKING_META_PAGE_ID TRACKING_META_WABA_ID TRACKING_META_WABA_DATASET_ID TRACKING_META_TEST_EVENT_CODE
       TRACKING_GOOGLE_ADS_CUSTOMER_ID TRACKING_GOOGLE_ADS_INGEST_SECRET
       TRACKING_POSTIZ_URL TRACKING_POSTIZ_API_SECRET
       TRACKING_OPENREPLY_URL TRACKING_OPENREPLY_API_SECRET
@@ -46,6 +46,24 @@ module Tracking
 
     def capi_token
       get('TRACKING_META_CAPI_TOKEN_SECRET').presence || get('TRACKING_META_ACCESS_TOKEN_SECRET')
+    end
+
+    # Origens que o Meta consegue atribuir (anúncio, pixel do site, Instagram). Contatos de outras
+    # origens não vão para a CAPI, para não mandar dados de quem não veio do Meta.
+    CAPI_CHANNELS = %w[meta site instagram].freeze
+
+    def capi_contact?(contact)
+      CAPI_CHANNELS.include?((contact&.custom_attributes || {})['origem_canal'].to_s)
+    end
+
+    # Conjunto de dados ligado à WABA (eventos business_messaging, com ctwa_clid). Usa o token do
+    # usuário do sistema, que precisa ter esse conjunto de dados atribuído no portfólio.
+    def waba_dataset
+      get('TRACKING_META_WABA_DATASET_ID').presence
+    end
+
+    def waba_capi_token
+      get('TRACKING_META_ACCESS_TOKEN_SECRET').presence || capi_token
     end
 
     def google_ingest_secret
