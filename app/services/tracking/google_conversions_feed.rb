@@ -2,8 +2,8 @@
 # programado (sem API). Só contatos de origem google; etapas reunião, contrato e pagamento dos
 # últimos 90 dias. Cada linha leva o gclid (quando o clique veio do site com aceite) e o e-mail e o
 # telefone em SHA-256 (conversões otimizadas para leads).
-# Para não contar duas vezes linhas sem gclid, cada evento só aparece nas buscas das 36 h seguintes
-# à primeira vez que saiu na planilha.
+# O Google Ads busca a planilha uma vez por dia para cada ação (reunião 21 h, contrato 12 h, pagamento
+# 1 h). Cada evento só aparece nas 23 h seguintes à primeira vez que saiu: cada ação o vê uma vez só.
 require 'csv'
 
 module Tracking
@@ -15,7 +15,7 @@ module Tracking
     }.freeze
     HEADER = ['Google Click ID', 'Email', 'Phone Number', 'Conversion Name', 'Conversion Time',
               'Conversion Value', 'Conversion Currency'].freeze
-    WINDOW = 36.hours
+    WINDOW = 23.hours
     EXAMPLE = ['EXEMPLO-IGNORAR', Digest::SHA256.hexdigest('exemplo@exemplo.com'), Digest::SHA256.hexdigest('+5500000000000'),
                'Exemplo (ignorar)', '2000-01-01 00:00:00-03:00', '0.00', 'BRL'].freeze
 
