@@ -1,6 +1,6 @@
 # evo-jud-crm: recebe as métricas diárias do Google Ads (script colado na conta do Google Ads).
 # Autenticação: cabeçalho X-Tracking-Secret = TRACKING_GOOGLE_ADS_INGEST_SECRET.
-class Webhooks::TrackingController < ActionController::API
+class Api::V1::Webhooks::TrackingController < ActionController::API
   def google_ads
     secret = Tracking::Config.google_ingest_secret.to_s
     given = request.headers['X-Tracking-Secret'].to_s
