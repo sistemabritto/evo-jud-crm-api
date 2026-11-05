@@ -48,9 +48,10 @@ module Tracking
       get('TRACKING_META_CAPI_TOKEN_SECRET').presence || get('TRACKING_META_ACCESS_TOKEN_SECRET')
     end
 
-    # Origens que o Meta consegue atribuir (anúncio, pixel do site, Instagram). Contatos de outras
-    # origens não vão para a CAPI, para não mandar dados de quem não veio do Meta.
-    CAPI_CHANNELS = %w[meta site instagram].freeze
+    # Origens que o Meta consegue atribuir: anúncio, pixel do site, Instagram e posts/respostas
+    # publicados no Facebook/Instagram pelo Postiz e pelo OpenReply. Contatos sem origem (clientes
+    # antigos, equipe) e do Google não vão para a CAPI.
+    CAPI_CHANNELS = %w[meta site instagram postiz openreply].freeze
 
     def capi_contact?(contact)
       CAPI_CHANNELS.include?((contact&.custom_attributes || {})['origem_canal'].to_s)
