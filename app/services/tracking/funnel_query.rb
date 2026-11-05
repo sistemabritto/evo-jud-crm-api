@@ -24,7 +24,7 @@ module Tracking
         range = @from.in_time_zone.beginning_of_day..@to.in_time_zone.end_of_day
         scope = Contact.where(id: TrackingEvent.where(stage: 'conversa_iniciada', occurred_at: range).select(:contact_id))
         scope = filter_channel(scope)
-        excluded = Contact.tagged_with(EXCLUDED_LABELS, any: true).select(:id)
+        excluded = Contact.tagged_with(EXCLUDED_LABELS, any: true).pluck(:id)
         scope.where.not(id: excluded).pluck(:id)
       end
     end
@@ -90,12 +90,11 @@ module Tracking
     private
 
     def filter_channel(scope)
-      canal = Arel.sql("custom_attributes->>'origem_canal'")
       case @channel
       when 'todos' then scope
-      when 'pago' then scope.where(canal => Tracking::Attribution::PAID)
-      when 'organico' then scope.where("custom_attributes->>'origem_canal' IS NULL OR custom_attributes->>'origem_canal' = 'organico'")
-      else scope.where(canal => @channel)
+      when 'pago' then scope.where("contacts.custom_attributes->>'origem_canal' IN (?)", Tracking::Attribution::PAID)
+      when 'organico' then scope.where("contacts.custom_attributes->>'origem_canal' IS NULL OR contacts.custom_attributes->>'origem_canal' = 'organico'")
+      else scope.where("contacts.custom_attributes->>'origem_canal' = ?", @channel)
       end
     end
 
