@@ -2008,9 +2008,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_11_05_030000) do
   add_foreign_key "user_roles", "users"
   add_foreign_key "user_roles", "users", column: "granted_by_id"
   add_foreign_key "user_tours", "users"
-  # no candidate create_trigger statement could be found, creating an adapter-specific one
-  execute("CREATE TRIGGER update_campaign_executions_updated_at BEFORE UPDATE ON \"campaign_executions\" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()")
-
+  # evo-jud-crm: a função precisa existir antes do trigger que a usa (instalação nova com db:schema:load).
   # no candidate create_trigger statement could be found, creating an adapter-specific one
   execute(<<-SQL)
 CREATE OR REPLACE FUNCTION public.update_updated_at_column()
@@ -2023,5 +2021,8 @@ AS $function$
       END;
       $function$
   SQL
+
+  # no candidate create_trigger statement could be found, creating an adapter-specific one
+  execute("CREATE TRIGGER update_campaign_executions_updated_at BEFORE UPDATE ON \"campaign_executions\" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()")
 
 end
