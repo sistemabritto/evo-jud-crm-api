@@ -10,6 +10,7 @@ module Tracking
       conversation = message.conversation
       contact = conversation&.contact
       return if contact.nil? || conversation.inbox&.channel_type == 'Channel::Email'
+      return unless Tracking::Config.acquisition_inbox?(conversation.inbox_id)
 
       if message.incoming?
         origin = Tracking::Attribution.parse(message.content, message.content_attributes&.dig('ad_referral'))

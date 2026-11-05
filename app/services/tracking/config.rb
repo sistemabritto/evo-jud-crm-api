@@ -3,7 +3,7 @@
 module Tracking
   module Config
     KEYS = %w[
-      TRACKING_WHATSAPP_NUMBER TRACKING_SCHEDULING_URLS
+      TRACKING_WHATSAPP_NUMBER TRACKING_SCHEDULING_URLS TRACKING_ACQUISITION_INBOX_IDS
       TRACKING_STAGE_MEETING_IDS TRACKING_STAGE_CONTRACT_IDS TRACKING_STAGE_PAYMENT_IDS
       TRACKING_META_AD_ACCOUNT_ID TRACKING_META_ACCESS_TOKEN_SECRET
       TRACKING_META_PIXEL_ID TRACKING_META_CAPI_TOKEN_SECRET TRACKING_META_CAPI_ENABLED
@@ -29,6 +29,17 @@ module Tracking
     def scheduling_patterns
       configured = list('TRACKING_SCHEDULING_URLS')
       (configured.presence || DEFAULT_SCHEDULING).map(&:downcase)
+    end
+
+    # Caixas de entrada de aquisição (chip comercial). Vazio = todas. Suporte e outras caixas não
+    # entram no funil: nem atribuição, nem conversa iniciada, nem link de agendamento.
+    def acquisition_inbox_ids
+      list('TRACKING_ACQUISITION_INBOX_IDS')
+    end
+
+    def acquisition_inbox?(inbox_id)
+      ids = acquisition_inbox_ids
+      ids.empty? || ids.include?(inbox_id.to_s)
     end
 
     def stage_ids(kind)

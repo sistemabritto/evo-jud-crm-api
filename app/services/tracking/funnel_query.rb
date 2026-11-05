@@ -22,7 +22,13 @@ module Tracking
     def contact_ids
       @contact_ids ||= begin
         range = @from.in_time_zone.beginning_of_day..@to.in_time_zone.end_of_day
-        scope = Contact.where(id: TrackingEvent.where(stage: 'conversa_iniciada', occurred_at: range).select(:contact_id))
+        events = TrackingEvent.where(stage: 'conversa_iniciada', occurred_at: range)
+        inboxes = Tracking::Config.acquisition_inbox_ids
+        if inboxes.any?
+          events = events.where('tracking_events.conversation_id IS NULL OR tracking_events.conversation_id IN (?)',
+                                Conversation.where(inbox_id: inboxes).select(:id))
+        end
+        scope = Contact.where(id: events.select(:contact_id))
         scope = filter_channel(scope)
         excluded = Contact.tagged_with(EXCLUDED_LABELS, any: true).pluck(:id)
         scope.where.not(id: excluded).pluck(:id)
@@ -35,7 +41,12 @@ module Tracking
       revenue = TrackingEvent.where(contact_id: ids, stage: 'pagamento_efetuado').sum(:value_cents)
       ads = ad_totals
       stages = []
-      stages << { key: 'cliques', value: ads[:clicks] } if ads
+      site = site_clicks
+      if ads
+        stages << { key: 'cliques', value: ads[:clicks] }
+      elsif @channel == 'site' && site[:organic].positive?
+        stages << { key: 'cliques', value: site[:organic] }
+      end
       TrackingEvent::STAGES.each { |s| stages << { key: s, value: counts[s].to_i } }
       top = stages.first[:value].to_i
       prev = nil
@@ -56,8 +67,17 @@ module Tracking
           per_contract_cents: div(spend, counts['contrato_assinado']),
           roas: spend.positive? ? (revenue.to_f / spend).round(2) : nil
         } : nil,
-        by_channel: by_channel
+        by_channel: by_channel,
+        site_clicks: site
       }
+    end
+
+    # Cliques no botão de WhatsApp do site (beacon anônimo do site, sem cookies). Orgânico = código S…;
+    # os demais vieram de anúncio (G… = Google, sem prefixo = Meta) e já contam no clique do anúncio.
+    def site_clicks
+      rows = TrackingAdMetric.where(platform: 'site', date: @from..@to).group(:campaign_id).sum(:clicks)
+      organic = rows.select { |code, _| code.start_with?('S') }.values.sum
+      { organic: organic, from_ads: rows.values.sum - organic, by_code: rows }
     end
 
     def campaigns
@@ -101,7 +121,7 @@ module Tracking
     def ad_scope
       platforms = case @channel
                   when 'meta', 'google' then [@channel]
-                  when 'pago', 'todos' then TrackingAdMetric::PLATFORMS
+                  when 'pago', 'todos' then TrackingAdMetric::ADS_PLATFORMS
                   end
       return nil unless platforms
 

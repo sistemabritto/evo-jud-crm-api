@@ -363,6 +363,7 @@ Rails.application.routes.draw do
           post 'whatsapp/evolution_go', to: 'webhooks/whatsapp#process_evolution_go_payload'
           # evo-jud-crm: métricas do Google Ads enviadas pelo script da conta
           post 'tracking/google_ads', to: 'webhooks/tracking#google_ads'
+          post 'tracking/site_click', to: 'webhooks/tracking#site_click'
           post 'whatsapp/zapi', to: 'webhooks/whatsapp#process_payload'
 
           # Telegram webhooks

@@ -8,6 +8,8 @@ module Tracking
       stats = Hash.new(0)
       scope = Conversation.joins(:inbox).where.not(inboxes: { channel_type: 'Channel::Email' })
       scope = scope.where('conversations.created_at >= ?', since) if since
+      inboxes = Tracking::Config.acquisition_inbox_ids
+      scope = scope.where(inbox_id: inboxes) if inboxes.any?
       scope.find_each do |conversation|
         contact = conversation.contact
         next unless contact

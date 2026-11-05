@@ -126,6 +126,11 @@ class Rack::Attack
     req.ip if req.post? && req.path_without_extentions == '/api/v1/products/import_fetch'
   end
 
+  ## evo-jud-crm: cliques no WhatsApp do site (beacon público). IP real vem da Cloudflare.
+  throttle('tracking/site_click/ip', limit: 30, period: 1.hour) do |req|
+    (req.get_header('HTTP_CF_CONNECTING_IP').presence || req.ip) if req.post? && req.path.end_with?('/webhooks/tracking/site_click')
+  end
+
   ## Anti-spam for anonymous lead-capture form submissions (B14.01) ###
   throttle('public/forms/submissions/ip', limit: ENV.fetch('FORM_SUBMISSION_RATE_LIMIT', '10').to_i, period: 1.hour) do |req|
     req.ip if req.post? && req.path_without_extentions.match?(%r{\A/public/api/v1/forms/[^/]+/submissions\z})

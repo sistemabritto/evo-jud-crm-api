@@ -19,4 +19,22 @@ class Api::V1::Webhooks::TrackingController < ActionController::API
     GlobalConfig.set('TRACKING_GOOGLE_LAST_INGEST_AT', Time.current.iso8601)
     render json: { ok: true, rows: rows.size }
   end
+
+  # Clique no botão de WhatsApp do site (navigator.sendBeacon, corpo = código da mensagem).
+  # Público e anônimo: só conta cliques por dia e código. Limite por IP no Rack::Attack.
+  SITE_CODE = /\A(?:[SGPO]?[A-Z]{3}\d{1,3}|IG\d{1,3})\z/
+
+  def site_click
+    code = (request.raw_post.presence || params[:code]).to_s.strip.upcase.first(12)
+    return head(:no_content) unless SITE_CODE.match?(code)
+
+    now = Time.current
+    TrackingAdMetric.upsert(
+      { platform: 'site', date: Date.current, campaign_id: code, campaign_name: 'Site', spend_cents: 0,
+        impressions: 0, clicks: 1, conversations: 0, created_at: now, updated_at: now },
+      unique_by: %i[platform date campaign_id],
+      on_duplicate: Arel.sql('clicks = tracking_ad_metrics.clicks + 1, updated_at = EXCLUDED.updated_at')
+    )
+    head :no_content
+  end
 end
