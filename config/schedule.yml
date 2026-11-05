@@ -108,3 +108,12 @@ tracking_meta_insights_job:
   cron: '20 */3 * * *'
   class: 'Tracking::MetaInsightsJob'
   queue: scheduled_jobs
+
+# LGPD: descarta os pixels de fotos antigas (o texto extraído fica em
+# attachment.meta). Só roda se IMAGE_ATTACHMENT_RETENTION_DAYS estiver definido.
+image_attachment_retention_job:
+  cron: '15 3 * * *'
+  class: 'Messages::ImageAttachmentRetentionJob'
+  queue: housekeeping
+  description: 'Purge image files older than IMAGE_ATTACHMENT_RETENTION_DAYS (keeps extracted text)'
+

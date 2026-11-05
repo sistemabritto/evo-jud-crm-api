@@ -374,6 +374,7 @@ class Message < ApplicationRecord
     execute_message_template_hooks
     update_contact_activity
     transcribe_incoming_audio
+    extract_text_from_incoming_images
   end
 
   def update_contact_activity
@@ -568,6 +569,18 @@ class Message < ApplicationRecord
     # Schedule transcription job for each audio attachment
     attachments.select(&:audio?).each do |audio_attachment|
       Messages::AudioTranscriptionJob.perform_later(audio_attachment.id)
+    end
+  end
+
+  # Photos of documents used to reach the agent with no words at all. The
+  # extraction writes the visible text to attachment.meta['transcribed_text'],
+  # the same field audio uses, so the delegation can hand it to the agent.
+  def extract_text_from_incoming_images
+    return unless incoming?
+    return unless attachments.any?(&:image?)
+
+    attachments.select(&:image?).each do |image_attachment|
+      Messages::ImageTextExtractionJob.perform_later(image_attachment.id)
     end
   end
 

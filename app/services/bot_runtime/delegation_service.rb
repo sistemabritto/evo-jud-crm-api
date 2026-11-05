@@ -9,14 +9,25 @@ module BotRuntime
 
     # has_attachments defaults to true so a caller that omits it still looks for
     # media instead of silently skipping it.
-    def initialize(agent_bot, message, conversation, has_attachments: true)
+    #
+    # wait_for_images: hold the delegation until pending image text extraction
+    # finishes, so the agent receives words instead of re-deciding whether it can
+    # read the picture. The job re-enters with it off.
+    # dedup: message_created and message_updated both reach delegate for the same
+    # record (transcription meta update is a save). One claim per message.
+    def initialize(agent_bot, message, conversation, has_attachments: true, wait_for_images: true, dedup: true)
       @agent_bot = agent_bot
       @message = message
       @conversation = conversation
       @has_attachments = has_attachments
+      @wait_for_images = wait_for_images
+      @dedup = dedup
     end
 
     def delegate
+      return if @dedup && !claim_delegation
+      return if defer_for_pending_images
+
       event = build_message_event
       BotRuntime::SendEventJob.perform_later(event)
 
@@ -25,6 +36,28 @@ module BotRuntime
     end
 
     private
+
+    def claim_delegation
+      Redis::Alfred.set("bot_runtime:delegated:#{@message.id}", 1, nx: true, ex: 120)
+    end
+
+    # Image-only messages used to reach the model before any extraction existed.
+    # Hold them briefly: the job extracts, then delegates with wait_for_images
+    # off. Text messages and acoustic-only messages pay no query.
+    def defer_for_pending_images
+      return false unless @wait_for_images && @has_attachments
+
+      persisted = @conversation.messages
+                               .includes(ATTACHMENT_PRELOAD)
+                               .find_by(id: @message.id)
+      return false if persisted.nil?
+
+      pending = persisted.attachments.select { |att| att.image? && att.meta&.[]('transcribed_text').blank? }
+      return false if pending.empty?
+
+      BotRuntime::ImageTextDelegationJob.perform_later(@agent_bot.id, @message.id.to_s)
+      true
+    end
 
     def build_message_event
       {
@@ -88,7 +121,8 @@ module BotRuntime
       {
         url: BlobUrlOptions.outbound_media_url(blob),
         content_type: blob.content_type,
-        file_type: att.file_type
+        file_type: att.file_type,
+        transcribed_text: att.meta&.[]('transcribed_text')
       }
     rescue StandardError => e
       log_attachment_failure("attachment #{att.id}", e)
@@ -104,18 +138,37 @@ module BotRuntime
     end
 
     # Belt-and-suspenders alongside build_attachments (EVO-2179): if the AI
-    # processor's own audio handling isn't wired up on some deployment,
-    # CRM-side transcription (Messages::AudioTranscriptionService writes to
-    # attachment.meta['transcribed_text'], enabled via
-    # OPENAI_ENABLE_AUDIO_TRANSCRIPTION) still gets the words to the bot as
-    # text. message.content itself is never populated for audio messages —
-    # without this fallback every voice note reaches the bot with an empty
-    # message_content even when the transcription succeeded.
+    # processor's own media handling isn't wired up on some deployment, CRM-side
+    # transcription/extraction (Messages::AudioTranscriptionService and
+    # Messages::ImageTextExtractionService write to
+    # attachment.meta['transcribed_text']) still gets the words to the bot as
+    # text. message.content itself is never populated for media messages —
+    # without this fallback a voice note or a document photo reaches the bot
+    # with empty message_content even when the words were extracted.
     def resolved_message_content
       text = @message.content.to_s
-      return text if text.present?
+      extracted = extracted_media_text
+      [text.presence, extracted.presence].compact.join("\n")
+    end
 
-      @message.attachments.to_a.filter_map { |att| att.meta&.[]('transcribed_text').presence }.first.to_s
+    # Same reload as build_attachments: @message is an unpersisted shell whose
+    # attachments are empty, so reading it directly would always miss the
+    # transcription. Audio and image text share meta['transcribed_text']; the
+    # image gets a marker so the agent knows it came from OCR, not the client.
+    def extracted_media_text
+      persisted = @conversation.messages
+                               .includes(ATTACHMENT_PRELOAD)
+                               .find_by(id: @message.id)
+      return '' if persisted.nil?
+
+      persisted.attachments.filter_map { |att| attachment_text(att) }.join("\n")
+    end
+
+    def attachment_text(att)
+      text = att.meta&.[]('transcribed_text').presence
+      return if text.blank?
+
+      att.audio? ? text : "[Texto lido automaticamente da imagem]: #{text}"
     end
 
     def build_bot_config

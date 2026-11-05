@@ -14,6 +14,7 @@ class Ai::ConsumerCompatibility
     ai_agents: ALL_PROVIDERS,
     inbox_assist: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS,
     audio_transcription: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS,
+    image_text_extraction: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS,
     label_suggestion: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS,
     moderation: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS
   }.freeze

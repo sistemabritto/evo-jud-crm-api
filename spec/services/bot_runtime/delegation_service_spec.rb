@@ -51,6 +51,7 @@ RSpec.describe BotRuntime::DelegationService do
     allow(BlobUrlOptions).to receive(:outbound_media_url).with(blob).and_return(url)
     instance_double(Attachment, file: file, with_attached_file?: opts.fetch(:with_attached, true),
                                 file_type: file_type, id: opts.fetch(:id, 'att-1'),
+                                meta: opts.fetch(:meta, {}),
                                 created_at: opts.fetch(:created_at, Time.zone.local(2026, 7, 20, 12, 0, 0)))
   end
 
@@ -99,7 +100,8 @@ RSpec.describe BotRuntime::DelegationService do
         [{
           url: 'https://crm.example.com/rails/active_storage/blobs/proxy/photo.png',
           content_type: 'image/png',
-          file_type: 'image'
+          file_type: 'image',
+          transcribed_text: nil
         }]
       )
     end
@@ -167,6 +169,40 @@ RSpec.describe BotRuntime::DelegationService do
     end
   end
 
+  describe '#resolved_message_content' do
+    before { allow(message).to receive(:content).and_return('') }
+
+    it 'uses the text extracted from an image and marks it as automatic' do
+      stub_persisted_with([attachment(file_type: 'image', meta: { 'transcribed_text' => 'Nome: Ana\nCPF: 123' })])
+
+      expect(service.send(:resolved_message_content)).to eq(
+        "[Texto lido automaticamente da imagem]: Nome: Ana\nCPF: 123"
+      )
+    end
+
+    it 'keeps audio transcription unprefixed' do
+      stub_persisted_with([attachment(file_type: 'audio', meta: { 'transcribed_text' => 'bom dia' })])
+
+      expect(service.send(:resolved_message_content)).to eq('bom dia')
+    end
+
+    it 'keeps the caption and appends the extracted text' do
+      allow(message).to receive(:content).and_return('segue o documento')
+      stub_persisted_with([attachment(file_type: 'image', meta: { 'transcribed_text' => 'CPF: 123' })])
+
+      expect(service.send(:resolved_message_content)).to eq(
+        "segue o documento\n[Texto lido automaticamente da imagem]: CPF: 123"
+      )
+    end
+
+    it 'returns the caption when no media was extracted' do
+      allow(message).to receive(:content).and_return('oi')
+      stub_persisted_with([])
+
+      expect(service.send(:resolved_message_content)).to eq('oi')
+    end
+  end
+
   describe '#build_message_event' do
     before { allow(BotRuntime::Config).to receive(:postback_base_url).and_return('https://crm.example.com') }
 
@@ -178,7 +214,8 @@ RSpec.describe BotRuntime::DelegationService do
       event = service.send(:build_message_event)
 
       expect(event[:attachments]).to eq(
-        [{ url: 'https://crm.example.com/img.png', content_type: 'image/png', file_type: 'image' }]
+        [{ url: 'https://crm.example.com/img.png', content_type: 'image/png', file_type: 'image',
+           transcribed_text: nil }]
       )
       expect(event.keys).to include(:agent_bot_id, :conversation_id, :contact_id, :message_id, :message_content,
                                     :attachments, :api_key, :outgoing_url, :bot_config, :postback_url, :metadata)
