@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_11_04_230000) do
+ActiveRecord::Schema[7.1].define(version: 2026_11_05_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1809,6 +1809,16 @@ ActiveRecord::Schema[7.1].define(version: 2026_11_04_230000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["platform", "date", "campaign_id"], name: "index_tracking_ad_metrics_on_platform_and_date_and_campaign_id", unique: true
+  end
+
+  create_table "tracking_click_refs", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "ref", null: false
+    t.string "gclid", null: false
+    t.string "code"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_at"], name: "index_tracking_click_refs_on_created_at"
+    t.index ["ref"], name: "index_tracking_click_refs_on_ref", unique: true
   end
 
   create_table "tracking_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|

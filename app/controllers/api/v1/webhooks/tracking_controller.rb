@@ -1,6 +1,8 @@
 # evo-jud-crm: recebe as métricas diárias do Google Ads (script colado na conta do Google Ads).
 # Autenticação: cabeçalho X-Tracking-Secret = TRACKING_GOOGLE_ADS_INGEST_SECRET.
 class Api::V1::Webhooks::TrackingController < ActionController::API
+  include ActionController::HttpAuthentication::Basic::ControllerMethods
+
   def google_ads
     secret = Tracking::Config.google_ingest_secret.to_s
     given = request.headers['X-Tracking-Secret'].to_s
@@ -24,9 +26,15 @@ class Api::V1::Webhooks::TrackingController < ActionController::API
   # Público e anônimo: só conta cliques por dia e código. Limite por IP no Rack::Attack.
   SITE_CODE = /\A(?:[SGPO]?[A-Z]{3}\d{1,3}|IG\d{1,3})\z/
 
+  # Corpo: "CÓDIGO" ou "CÓDIGO REF GCLID" (só com aceite de cookies e vindo de anúncio do Google).
   def site_click
-    code = (request.raw_post.presence || params[:code]).to_s.strip.upcase.first(12)
+    parts = (request.raw_post.presence || params[:code]).to_s.strip.first(400).split(/\s+/, 3)
+    code = parts[0].to_s.upcase.first(12)
     return head(:no_content) unless SITE_CODE.match?(code)
+
+    if parts[1] && parts[2]
+      TrackingClickRef.create(ref: parts[1].upcase, gclid: parts[2], code: code) rescue nil # rubocop:disable Style/RescueModifier
+    end
 
     now = Time.current
     TrackingAdMetric.upsert(
@@ -36,5 +44,18 @@ class Api::V1::Webhooks::TrackingController < ActionController::API
       on_duplicate: Arel.sql('clicks = tracking_ad_metrics.clicks + 1, updated_at = EXCLUDED.updated_at')
     )
     head :no_content
+  end
+
+  # Planilha de conversões offline para o Google Ads (Metas › Uploads › Programações, fonte HTTPS).
+  # Autenticação básica: usuário "google", senha = TRACKING_GOOGLE_CONVERSIONS_FEED_SECRET.
+  def google_conversions
+    secret = Tracking::Config.get('TRACKING_GOOGLE_CONVERSIONS_FEED_SECRET').to_s
+    ok = secret.present? && ActionController::HttpAuthentication::Basic.has_basic_credentials?(request) &&
+         ActionController::HttpAuthentication::Basic.user_name_and_password(request).then do |user, pass|
+           user == 'google' && ActiveSupport::SecurityUtils.secure_compare(secret, pass.to_s)
+         end
+    return request_http_basic_authentication('google-ads') unless ok
+
+    send_data Tracking::GoogleConversionsFeed.csv, type: 'text/csv; charset=utf-8', filename: 'conversoes-google.csv'
   end
 end

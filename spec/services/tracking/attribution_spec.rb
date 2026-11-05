@@ -18,6 +18,10 @@ RSpec.describe Tracking::Attribution do
       end
     end
 
+    it 'reads the site click reference after the code' do
+      expect(described_class.parse('Olá! [GINV1-AB12C]')).to include(channel: 'google', campaign: 'ginv1', ref: 'AB12C')
+    end
+
     it 'ignores text without a trailing code' do
       expect(described_class.parse('Olá, quero saber do meu processo')).to be_nil
     end

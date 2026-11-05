@@ -18,7 +18,8 @@ module Tracking
     CHANNEL_PREFIX = PREFIX_CHANNEL.invert.freeze
     CHANNELS = %w[meta google site instagram postiz openreply organico].freeze
     PAID = %w[meta google].freeze
-    CODE = /\[(?<prefix>[SGPO])?(?<area>[A-Z]{3})(?<n>\d{1,3})\]\s*\z/
+    # Referência opcional depois do código ([GINV1-AB12C]): clique do site com gclid guardado.
+    CODE = /\[(?<prefix>[SGPO])?(?<area>[A-Z]{3})(?<n>\d{1,3})(?:-(?<ref>[A-Z0-9]{5}))?\]\s*\z/
     IG_CODE = /\[IG(?<n>\d{1,3})\]\s*\z/
 
     module_function
@@ -30,6 +31,7 @@ module Tracking
       if (m = text.match(CODE))
         origin = { channel: PREFIX_CHANNEL[m[:prefix]], campaign: "#{m[:prefix]}#{m[:area]}#{m[:n]}".downcase,
                    area: AREAS[m[:area]] }
+        origin[:ref] = m[:ref] if m[:ref]
       elsif (m = text.match(IG_CODE))
         origin = { channel: 'instagram', campaign: "ig#{m[:n]}", area: nil }
       end
@@ -56,6 +58,10 @@ module Tracking
       end
       attrs['origem_anuncio_id'] ||= origin[:ad_id] if origin[:ad_id]
       attrs['origem_ctwa_clid'] = origin[:ctwa_clid] if origin[:ctwa_clid]
+      if origin[:ref] && (click = TrackingClickRef.find_by(ref: origin[:ref]))
+        attrs['origem_gclid'] = click.gclid
+        attrs['origem_gclid_at'] = click.created_at.iso8601
+      end
       attrs['origem_ultimo_canal'] = origin[:channel]
       attrs['origem_ultima_campanha'] = origin[:campaign] if origin[:campaign]
       contact.update!(custom_attributes: attrs) if attrs != contact.custom_attributes
