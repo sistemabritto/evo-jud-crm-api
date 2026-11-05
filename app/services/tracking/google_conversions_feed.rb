@@ -35,7 +35,8 @@ module Tracking
         ev.update_columns(metadata: ev.metadata.merge('google_feed_at' => now.iso8601)) if first.blank?
         rows << row
       end
-      "Parameters:TimeZone=-0300\n" + CSV.generate { |c| c << HEADER; rows.each { |r| c << r } }
+      # Cabeçalho na 1ª linha (conexão HTTPS do Google Ads); fuso vai na própria hora.
+      CSV.generate { |c| c << HEADER; rows.each { |r| c << r } }
     end
 
     def row_for(event)
@@ -48,7 +49,7 @@ module Tracking
 
       value = event.stage == 'pagamento_efetuado' && event.value_cents.to_i.positive? ? format('%.2f', event.value_cents / 100.0) : nil
       [gclid, email && sha(email), phone && sha(phone), NAMES[event.stage],
-       event.occurred_at.in_time_zone('America/Bahia').strftime('%Y-%m-%d %H:%M:%S'), value, value && 'BRL']
+       event.occurred_at.in_time_zone('America/Bahia').strftime('%Y-%m-%d %H:%M:%S%:z'), value, value && 'BRL']
     end
 
     def e164(raw)
