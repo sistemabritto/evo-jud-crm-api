@@ -18,19 +18,19 @@ RSpec.describe Whatsapp::PhoneNumberNormalizer do
 
     context 'with Brazilian numbers (+55)' do
       context 'when DDD >= 31 (mobile with extra 9)' do
-        # DDD 74, subscriber leads with 9 -> the nono dígito is stripped.
+        # DDD 74, 13 digits already carry the nono dígito: it is kept.
         let(:input) { '5574999879409' }
 
-        it 'strips the 9 to 12 digits' do
-          expect(normalized).to eq('557499879409')
+        it 'keeps the 9' do
+          expect(normalized).to eq('5574999879409')
         end
       end
 
-      context 'when DDD >= 31 already without the 9' do
+      context 'when DDD >= 31 arrives without the 9' do
         let(:input) { '557499879409' }
 
-        it 'is left unchanged (idempotent)' do
-          expect(normalized).to eq('557499879409')
+        it 'restores the 9 to 13 digits' do
+          expect(normalized).to eq('5574999879409')
         end
       end
 
@@ -43,21 +43,27 @@ RSpec.describe Whatsapp::PhoneNumberNormalizer do
         end
       end
 
-      context 'when the 8-digit subscriber leads with a digit < 7 (landline-like)' do
-        # In createJid, joker = first digit of the captured 8-digit subscriber.
-        # 55 74 9 69987940 -> subscriber "69987940", joker 6 (< 7) -> keep intact,
-        # even though DDD 74 >= 31.
-        let(:input) { '5574969987940' }
+      context 'with a landline (subscriber starts 2-5)' do
+        # 55 74 3244-8864 -> subscriber "32448864", landline prefix 3.
+        let(:input) { '557432448864' }
 
-        it 'keeps all digits' do
-          expect(normalized).to eq('5574969987940')
+        it 'keeps 12 digits, no 9' do
+          expect(normalized).to eq('557432448864')
+        end
+      end
+
+      context 'with a mobile whose subscriber starts 7-9' do
+        let(:input) { '557482488649' }
+
+        it 'restores the 9' do
+          expect(normalized).to eq('5574982488649')
         end
       end
 
       context 'with cosmetic formatting (+, spaces, parens)' do
         let(:input) { '+55 (74) 99987-9409' }
 
-        it 'cleans and strips the 9' do
+        it 'cleans and keeps the 9' do
           expect(normalized).to eq('557499879409')
         end
       end
@@ -102,9 +108,10 @@ RSpec.describe Whatsapp::PhoneNumberNormalizer do
 
     context 'idempotency' do
       it 'normalizing twice yields the same result' do
-        once = described_class.call('5574999879409')
+        once = described_class.call('557499879409')
         twice = described_class.call(once)
         expect(twice).to eq(once)
+        expect(once).to eq('5574999879409')
       end
     end
   end

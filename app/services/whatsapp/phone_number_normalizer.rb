@@ -10,8 +10,10 @@
 # converge on ONE string and stop duplicating.
 #
 # Covers the three countries with an "extra digit" quirk:
-#   - Brazil (+55):  the nono dígito. Kept for DDD <= 30 (or landline-leading
-#                    numbers); stripped for DDD >= 31 mobiles.
+#   - Brazil (+55):  the nono dígito. Kept for every mobile: DDD <= 30 already
+#                    came with 13 digits, and a 12-digit number whose subscriber
+#                    starts 6-9 gets the 9 inserted. Landlines (subscriber
+#                    starting 2-5) stay 12 digits.
 #   - Mexico (+52):  the leading "1" after the country code on 13-digit numbers.
 #   - Argentina (+54): the leading "9" after the country code on 13-digit numbers.
 #
@@ -72,20 +74,19 @@ class Whatsapp::PhoneNumberNormalizer
     country_code + number[3..]
   end
 
-  # Port of formatBRNumber: regex ^(dd)(dd)\d(\d{8})$ — country, DDD, the nono
-  # dígito (NOT captured), and the 8-digit subscriber number.
-  #   keep the 9 when leading subscriber digit < 7 OR DDD < 31
-  #   otherwise strip the 9
+  # Brazil stores the nono dígito. A 13-digit number already carries it; on a
+  # 12-digit WhatsApp JID it is restored after the DDD unless the subscriber
+  # looks like a landline (prefix 2-5). This is a superset of Evolution's
+  # createJid: the JID already comes with the 9, and the stored contact no
+  # longer loses it just because the DDD is >= 31.
   def format_br(number)
-    match = /\A(\d{2})(\d{2})\d(\d{8})\z/.match(number)
+    match = /\A(\d{2})(\d{2})(\d{8})\z/.match(number)
     return number unless match
 
     country, ddd, subscriber = match[1], match[2], match[3]
     return number unless country == '55'
+    return number if subscriber[0].to_i.between?(2, 5)
 
-    joker = subscriber[0].to_i
-    return match[0] if joker < 7 || ddd.to_i < 31
-
-    country + ddd + subscriber
+    country + ddd + '9' + subscriber
   end
 end
