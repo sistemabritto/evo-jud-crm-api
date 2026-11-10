@@ -5,6 +5,9 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
     @message = message
     @phone_number = phone_number
 
+    # Resposta do bot em voz para quem pediu áudio / lê com dificuldade (opt-in por env).
+    Whatsapp::BotAudioReply.new(message).attach_audio! if message.attachments.blank?
+
     if message.attachments.present?
       send_attachment_message(phone_number, message)
     elsif message.content_type == 'input_select'
