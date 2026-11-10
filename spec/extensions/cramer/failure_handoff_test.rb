@@ -35,6 +35,13 @@ module Conversations
   class InvalidHandoffError < StandardError; end
 end
 load ARGV.fetch(0, File.expand_path('../../../extensions/cramer/failure_handoff.rb', __dir__))
+# A consulta ActiveRecord de timeline é exercitada na VPS; aqui a linha do tempo vem do mock.
+module CramerFailureHandoff
+  def self.timeline(conversation); conversation.timeline_msgs; end
+end
+def msg(type, content, ago: 60, attrs: {})
+  OpenStruct.new(message_type: type.to_s, content: content, created_at: Time.now - ago, content_attributes: attrs)
+end
 class FakeMessages < Array
   def create!(**attrs); self << attrs; attrs; end
   def where(**attrs)
@@ -43,9 +50,11 @@ class FakeMessages < Array
   end
 end
 class FakeConversation
-  attr_accessor :team, :id, :inbox, :contact, :custom_attributes, :label_list, :status, :assignee_id
+  attr_accessor :team, :id, :inbox, :contact, :custom_attributes, :label_list, :status, :assignee_id,
+                :additional_attributes, :timeline_msgs
   attr_reader :messages
   def initialize
+    @additional_attributes={}; @timeline_msgs=[]
     @id='conversation-mock'; @inbox=OpenStruct.new(channel_type:'Channel::Whatsapp')
     @contact=OpenStruct.new(name:'Pessoa Cliente', email:nil, contact_type:'lead', phone_number:'5500000000000',
       label_list:[], additional_attributes:{}, custom_attributes:{'cramer_failure_notice_audience'=>'lead'})
@@ -145,6 +154,102 @@ class FailureHandoffTest < Minitest::Test
     assert @c.custom_attributes[H::CLAIM]
     H.handle!(@c,@bot)
     assert_equal 1, public_messages.size
+  end
+  def lead_sem_confirmacao(phone: '5571988887777', type: 'lead')
+    @c.contact.custom_attributes={}; @c.contact.phone_number=phone; @c.contact.contact_type=type
+    @c.contact.name='Maria Souza'
+  end
+  def test_ad_lead_gets_notice_without_manual_confirmation
+    lead_sem_confirmacao
+    @c.timeline_msgs=[msg(:incoming, 'Olá! Tenho interesse e queria mais informações.', attrs: {'ad_referral'=>{'source_id'=>'1'}})]
+    assert H.public_allowed?(@c)
+    @c.timeline_msgs=[msg(:incoming, 'quanto custa?')]
+    refute H.public_allowed?(@c), 'sem anúncio, sem resposta e sem saudação'
+    @c.contact.custom_attributes={'origem_ctwa_clid'=>'abc'}
+    assert H.public_allowed?(@c), 'atributo de anúncio no contato'
+    H.handle!(@c,@bot)
+    assert_equal [H::NOTICE], public_messages.map{|m|m[:content]}
+  end
+  def test_contact_who_replied_or_opened_like_a_person_is_allowed
+    lead_sem_confirmacao
+    @c.timeline_msgs=[msg(:incoming,'?',ago:300), msg(:outgoing,'Como posso ajudar?',ago:200), msg(:incoming,'sobre aposentadoria',ago:100)]
+    assert H.public_allowed?(@c)
+    @c.timeline_msgs=[msg(:incoming,'Bom dia, preciso falar com o doutor')]
+    assert H.public_allowed?(@c)
+    lead_sem_confirmacao(type:'visitor')
+    assert H.public_allowed?(@c), 'visitante também, com sinal concreto'
+  end
+  def test_automated_foreign_stale_group_and_signalless_contacts_are_denied
+    lead_sem_confirmacao
+    @c.timeline_msgs=[msg(:incoming,'Oi! Sua fatura está disponível. Não responda esta mensagem.')]
+    refute H.public_allowed?(@c), 'texto automático'
+    @c.timeline_msgs=[msg(:incoming,'Seu código de verificação é 123456')]
+    refute H.public_allowed?(@c), 'código de acesso'
+    @c.timeline_msgs=[msg(:incoming,'Bom dia, preciso de ajuda')]
+    assert H.public_allowed?(@c)
+    @c.contact.phone_number='447723442693'; refute H.public_allowed?(@c), 'número estrangeiro'
+    @c.contact.phone_number='557132221234'; refute H.public_allowed?(@c), 'fixo'
+    @c.contact.phone_number='5571988887777'
+    @c.timeline_msgs=[msg(:incoming,'Bom dia, preciso de ajuda',ago:90_000)]
+    refute H.public_allowed?(@c), 'mensagem com mais de 24 h'
+    @c.timeline_msgs=[msg(:incoming,'Bom dia, preciso de ajuda')]
+    @c.additional_attributes={'evolution_go_chat_id'=>'120363@g.us'}
+    refute H.public_allowed?(@c), 'grupo'
+    @c.additional_attributes={}
+    @c.timeline_msgs=[msg(:incoming,'Olá, veja https://promo.exemplo/oferta')]
+    refute H.public_allowed?(@c), 'abertura com link'
+    @c.timeline_msgs=[]
+    refute H.public_allowed?(@c), 'sem mensagem recebida'
+    @c.timeline_msgs=[msg(:incoming,'Bom dia, preciso de ajuda')]
+    @c.contact.contact_type='visitor'; @c.contact.custom_attributes={'cramer_failure_notice_audience'=>'lead'}
+    assert H.public_allowed?(@c)
+    @c.contact.contact_type='contact'; refute H.public_allowed?(@c), 'tipo fora de lead/customer/visitor'
+  end
+  def test_lid_only_contact_needs_ad_or_reply
+    lead_sem_confirmacao(phone: '', type: 'visitor'); @c.contact.identifier='248983716888667@lid'
+    @c.timeline_msgs=[msg(:incoming,'Olá, bom dia! Preciso de ajuda')]
+    refute H.public_allowed?(@c), 'só saudação não basta sem telefone'
+    @c.timeline_msgs=[msg(:incoming,'Olá! Posso ter mais informações sobre isso?', attrs: {'ad_referral'=>{'x'=>1}})]
+    assert H.public_allowed?(@c)
+    @c.contact.identifier=''; refute H.public_allowed?(@c), 'sem telefone e sem lid'
+    @c.contact.identifier='248983716888667@lid'
+    @c.timeline_msgs=[msg(:incoming,'Olá! Posso ter mais informações sobre isso?')]
+    assert H.public_allowed?(@c), 'texto padrão do anúncio da Meta'
+    @c.timeline_msgs=[msg(:incoming,'Quero saber do meu caso'), msg(:outgoing,'Claro!'), msg(:incoming,'')]
+    refute H.public_allowed?(@c), 'sem telefone, resposta sem anúncio não basta'
+    lead_sem_confirmacao
+    assert H.public_allowed?(@c), 'com celular, resposta em áudio (texto vazio) conta'
+    lead_sem_confirmacao(phone: '', type: 'visitor'); @c.contact.identifier=nil
+    @c.additional_attributes={'evolution_go_chat_id'=>'248983716888667@lid'}
+    @c.timeline_msgs=[msg(:incoming,'Olá! Posso ter mais informações sobre isso?')]
+    assert H.public_allowed?(@c), 'LID só no chat da conversa'
+    @c.additional_attributes={'evolution_go_chat_id'=>'159305219207238@lid'}
+    refute H.public_allowed?(@c), 'LID do escritório'
+  end
+  def test_lawyers_never_get_notice_even_as_active_client
+    lead_sem_confirmacao
+    base=[msg(:incoming,'Oi André',ago:600), msg(:outgoing,'Olá!',ago:500)]
+    @c.timeline_msgs=base+[msg(:incoming,'INGRIDY SANTANA OAB/BA 43792 CPF 000')]
+    refute H.public_allowed?(@c), 'OAB na mensagem'
+    @c.contact.label_list=['cliente-ativo']
+    refute H.public_allowed?(@c), 'nem com cliente-ativo'
+    @c.contact.label_list=[]
+    @c.timeline_msgs=base+[msg(:incoming,'Boa tarde, sou advogada e represento a parte')]
+    refute H.public_allowed?(@c), 'sou advogada'
+    ['Dra. Paula Lima','Dr Carlos','Carlos Adv','Paula (ADV)','Advocacia Silva'].each do |n|
+      @c.timeline_msgs=base; @c.contact.name=n; refute H.public_allowed?(@c), n
+    end
+    @c.contact.name='Draiton Souza'; assert H.public_allowed?(@c), 'nome que só começa com Dr'
+    @c.contact.name='Maria Souza'
+    @c.timeline_msgs=base+[msg(:incoming,'quero falar com o advogado sobre meu caso')]
+    assert H.public_allowed?(@c), 'lead pedindo advogado continua recebendo'
+  end
+  def test_business_names_still_denied_with_strong_signals
+    lead_sem_confirmacao
+    @c.timeline_msgs=[msg(:incoming,'Bom dia, preciso de ajuda', attrs: {'ad_referral'=>{'x'=>1}})]
+    ['Vivo','Claro Atendimento','Nubank','Itaú','Suporte Loja','Daniel'].each do |n|
+      @c.contact.name=n; refute H.public_allowed?(@c), n
+    end
   end
   def test_target_scope
     H::BOT_IDS.each{|id|assert H.target?(OpenStruct.new(id:id),@c)}

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 # Loaded by the existing native_replies initializer; no new service or environment setting.
 module CramerFailureHandoff
-  VERSION = '2026-11-07.3'
+  VERSION = '2026-11-10.2'
   BOT_IDS = %w[9de95c53-65f8-4af4-8348-07b1faf6ab92 2dc0c549-2d9f-415b-8c59-0250339a0f35].freeze
   EMAIL_BOT_ID = 'fd345baa-a80a-4db8-b384-c53ebb071c4f'
   ANDRE_ID = 'cab27585-2c41-4c0d-86ba-26b0552fd48f'
@@ -12,6 +12,20 @@ module CramerFailureHandoff
   CLAIM = 'cramer_failure_notice_claimed_at'
   NOTICE_KEY = 'cramer_failure_notice'
   DENY_LABELS = %w[equipe interno interna ignorar parceiro comercial empresa banco loja automatico automatica verificado opt-out fora-do-escopo].freeze
+
+  # Contas automáticas (operadora, banco, loja, código de acesso) não recebem aviso.
+  AUTOMATED_TEXT = /n[aã]o responda|mensagem autom[aá]tica|resposta autom[aá]tica|c[oó]digo de (verifica|seguran|acesso|confirma)|seu c[oó]digo|sua fatura|boleto|fatura dispon|protocolo de atendimento|descadastr|sair da lista|para sair|opt.?out|pedido (n[ºo°]|#)|rastreamento|sua compra/i
+  # Primeira mensagem com cara de pessoa: saudação ou pedido curto, sem link.
+  HUMAN_OPENING = /\b(oi|ol[aá]|bom dia|boa tarde|boa noite|preciso|gostaria|quero|queria|tenho|estou|minha|meu|doutor|dr|advogad\w*|ajuda|d[uú]vida|informa[cç][aã]o)\b/i
+  # Advogado: nome com Dr./Dra./Adv ou mensagem citando OAB / dizendo que é advogado.
+  LAWYER_NAME = /(\A|[\s(])(dr|dra|adv|advogad[oa]s?|advocacia|oab)(\b|\.)/
+  LAWYER_TEXT = /\bOAB\b|\bsou (o |a )?(advogad|adv\b)|\bsomos advogad|escrit[oó]rio de advocacia|advogad[oa] parceir|\bcolega advogad/i
+  AD_ATTRS = %w[origem_ctwa_clid origem_anuncio_id].freeze
+  # LIDs do escritório (73) 98212-3817 e do André (71) 8240-3986: contatos que às vezes
+  # chegam sem telefone, e aí CramerCare.internal? (que olha o telefone) não os reconhece.
+  INTERNAL_LIDS = %w[159305219207238 265854885302425].freeze
+  # Texto pré-preenchido do botão "Enviar mensagem" dos anúncios da Meta.
+  AD_TEXT = /\Aol[aá]!? posso ter mais informa[cç][oõ]es sobre isso\??\z/i
 
   def self.failure?(content)
     [LEGACY, DEFAULT, NOTICE].include?(content.to_s.strip)
@@ -37,16 +51,66 @@ module CramerFailureHandoff
     return false if (labels & DENY_LABELS).any?
     return false if CramerCare.internal?(conversation)
     return false if User.where('lower(email) = ?', contact.email.to_s.downcase).exists? && contact.email.present?
+    return false if group?(conversation)
     name = normalize(contact.name)
-    return false if name.match?(/\b(daniel|anna|ana|rafael|marina|andre|vivo|banco|bank|loja|comunica|automatico|automatica|bot)\b/)
+    return false if name.match?(/\b(daniel|anna|ana|rafael|marina|andre|vivo|claro|tim|nubank|itau|bradesco|santander|caixa|sicoob|sicredi|picpay|banco|bank|loja|store|comunica|automatico|automatica|bot|suporte|atendimento|sac|notificacao|noreply|ifood|shopee|correios|serasa)\b/)
     return false if User.pluck(:name, :display_name).flatten.compact.any? { |n| normalize(n).present? && normalize(n) == name }
     return false if attrs['nao_contatar'].to_s == 'true'
     return false if (attrs.to_a + extra.to_a).any? { |k, v| k.to_s.match?(/business|verified|comercial|automatic|internal|equipe/) && ![nil, false, '', 'false', 0, '0'].include?(v) }
-    return false unless %w[lead customer].include?(contact.contact_type)
-    # Existing cliente-ativo label or an explicit audience confirmation is required.
-    # Absence of a business flag
-    # or a name heuristic never promotes an unknown contact to a client.
-    labels.include?('cliente-ativo') || %w[cliente lead].include?(attrs['cramer_failure_notice_audience'])
+    return false if lawyer?(conversation, name)
+    # Confirmação humana existente continua valendo.
+    return true if %w[lead customer].include?(contact.contact_type) &&
+                   (labels.include?('cliente-ativo') || %w[cliente lead].include?(attrs['cramer_failure_notice_audience']))
+    return false unless %w[lead customer visitor].include?(contact.contact_type)
+    real_person?(conversation, attrs)
+  end
+
+  # Sem confirmação manual, só avisa quem tem sinais concretos de ser uma pessoa
+  # conversando agora: celular brasileiro, mensagem recente sem texto automático e
+  # (veio de anúncio, OU já respondeu ao escritório, OU abriu com saudação/pedido).
+  def self.real_person?(conversation, attrs)
+    contact = conversation.contact
+    phone = contact.phone_number.to_s.gsub(/\D/, '')
+    # Sem telefone (só @lid, comum em lead de anúncio) exige sinal de anúncio.
+    lid = lid_of(conversation)
+    return false if INTERNAL_LIDS.include?(lid)
+    lid_only = phone.empty? && lid.present?
+    return false unless phone.match?(/\A55\d{2}9\d{8}\z/) || lid_only
+    msgs = timeline(conversation)
+    incoming = msgs.select { |m| m.message_type.to_s == 'incoming' }
+    return false if incoming.empty? || incoming.last.created_at < Time.current - 86_400
+    return false if incoming.last(5).any? { |m| m.content.to_s.match?(AUTOMATED_TEXT) }
+    ad = AD_ATTRS.any? { |k| attrs[k].present? } ||
+         incoming.any? { |m| m.content_attributes.to_h['ad_referral'].present? || m.content.to_s.match?(AD_TEXT) }
+    first_out = msgs.index { |m| m.message_type.to_s == 'outgoing' }
+    # Resposta em áudio/foto chega com texto vazio e conta como resposta.
+    replied = first_out && msgs[(first_out + 1)..].any? { |m| m.message_type.to_s == 'incoming' }
+    opening = incoming.first.content.to_s.strip
+    human_opening = opening.length.between?(2, 300) && !opening.match?(%r{https?://|www\.}i) && opening.match?(HUMAN_OPENING)
+    return ad if lid_only
+    ad || replied || human_opening
+  end
+
+  # Advogados (parceiros ou não) nunca recebem o aviso, nem com cliente-ativo.
+  def self.lawyer?(conversation, name)
+    return true if name.match?(LAWYER_NAME)
+    timeline(conversation).any? { |m| m.message_type.to_s == 'incoming' && m.content.to_s.match?(LAWYER_TEXT) }
+  end
+
+  def self.lid_of(conversation)
+    [conversation.contact.identifier, conversation.additional_attributes.to_h['evolution_go_chat_id']]
+      .map(&:to_s).find { |v| v.end_with?('@lid') }.to_s.delete_suffix('@lid')
+  end
+
+  def self.timeline(conversation)
+    conversation.messages.where(private: false, message_type: %i[incoming outgoing])
+                .reorder(created_at: :desc).limit(40).to_a.reverse
+  end
+
+  def self.group?(conversation)
+    chat = conversation.additional_attributes.to_h['evolution_go_chat_id'].to_s
+    ident = conversation.contact.identifier.to_s
+    [chat, ident].any? { |v| v.end_with?('@g.us', '@newsletter', '@broadcast') }
   end
 
   def self.normalize(value)

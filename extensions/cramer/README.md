@@ -20,17 +20,29 @@ atribuições/notas/etiquetas já registradas. O artefato de rollback seguro man
 para conversas já bloqueadas. O backup original exato também está disponível,
 mas isoladamente não conhece `cramer_failure_human_required`.
 
-## Classificação conservadora
+## Quem recebe o aviso (versão 2026-11-10.2)
 
-Contato precisa ser `lead` ou `customer` **e** ter a etiqueta existente `cliente-ativo`
-ou a confirmação explícita
-`custom_attributes.cramer_failure_notice_audience` igual a `cliente` ou `lead`.
-Esse atributo deve refletir revisão humana no CRM. O patch não preenche esse
-atributo e não promove contatos desconhecidos. Mesmo com confirmação, nega
-outros canais, equipe (etiquetas, usuários, nomes e telefone interno), opt-out,
-marcadores comerciais/verificados/automáticos e nomes comerciais conhecidos.
-Na ausência dessas evidências positivas, nenhuma mensagem pública é criada. A transferência,
-nota privada e bloqueio permanecem. E-mail sempre fica sem aviso público.
+Sempre negado: advogados (nome com Dr./Dra./Adv ou mensagem citando OAB ou "sou advogado"), mesmo com `cliente-ativo`; canal que não seja WhatsApp (e-mail nunca recebe aviso), grupo/canal/
+status, equipe (etiquetas, usuários, nomes, telefone interno e LIDs do escritório e do
+André), opt-out, marcadores comerciais/verificados/automáticos e nomes de empresas
+(operadoras, bancos, lojas, suporte/atendimento).
+
+Passando por esses bloqueios, recebe o aviso:
+
+1. contato `lead`/`customer` com a etiqueta `cliente-ativo` ou a confirmação manual
+   `cramer_failure_notice_audience` = `cliente`/`lead`; ou
+2. contato `lead`/`customer`/`visitor` com sinais concretos de ser uma pessoa
+   conversando agora (`real_person?`):
+   - celular brasileiro (+55 DDD 9xxxx-xxxx). Sem telefone, só com `@lid`, exige
+     sinal de anúncio;
+   - mensagem recebida nas últimas 24 h e nenhuma das 5 últimas com texto de conta
+     automática (fatura, código, "não responda", rastreamento...);
+   - e pelo menos um destes: veio de anúncio (`origem_ctwa_clid`/`origem_anuncio_id`,
+     `ad_referral` ou texto padrão "Olá! Posso ter mais informações sobre isso?"),
+     já respondeu ao escritório (inclusive por áudio), ou abriu a conversa com
+     saudação/pedido curto e sem link.
+
+Sem aviso público, a transferência, a nota privada e o bloqueio continuam iguais.
 
 ## Persistência e retomada
 
