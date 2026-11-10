@@ -5,7 +5,10 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
     Rails.logger.info "WhatsApp webhook processing started: #{params.inspect}"
 
     channel = find_channel(params)
-    if channel_is_inactive?(channel)
+    # Connected/PairSuccess do Evolution Go são justamente os eventos que tiram o
+    # canal do estado "reautorizar"; descartá-los deixava o canal preso para sempre
+    # (o painel pedia QR em loop mesmo com a instância conectada).
+    if channel_is_inactive?(channel) && !(channel.present? && evolution_go_recovery_event?(params))
       # Fix B (EVO-1967): reconciliacao ativa. Se chega uma mensagem real e a Evolution
       # reporta a instancia como 'open', a flag de reauthorization esta presa indevidamente
       # (resto de um close transitorio) -> destrava (reauthorized!) e segue processando.
@@ -629,7 +632,18 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
   # descarte mensagens quando a Evolution ja esta 'open' novamente.
   def message_event?(params)
     params[:event].to_s == 'messages.upsert' ||
+      (evolution_go_params?(params) && params[:event].to_s == 'Message') ||
       params.dig(:entry, 0, :changes, 0, :value, :messages).present?
+  end
+
+  EVOLUTION_GO_RECOVERY_EVENTS = %w[Connected PairSuccess].freeze
+
+  def evolution_go_params?(params)
+    ActiveModel::Type::Boolean.new.cast(params[:evolution_go])
+  end
+
+  def evolution_go_recovery_event?(params)
+    evolution_go_params?(params) && EVOLUTION_GO_RECOVERY_EVENTS.include?(params[:event].to_s)
   end
 
   # Cooldown para nao re-consultar a Evolution a cada mensagem enquanto o canal segue
@@ -639,10 +653,12 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
 
   def reconcile_channel_state!(channel, params)
     return false unless channel.is_a?(Channel::Whatsapp)
-    return false unless channel.provider == 'evolution'
+    return false unless channel.provider.in?(%w[evolution evolution_go])
     return false if reconcile_on_cooldown?(channel)
 
     config = channel.provider_config || {}
+    return reconcile_evolution_go_state!(channel, config) if channel.provider == 'evolution_go'
+
     api_url = config['api_url'].presence
     instance = (config['instance_name'] || config['instance'] || params[:instance]).presence
     apikey = (config['instance_token'] || config['admin_token']).presence
@@ -670,6 +686,40 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
     ::Redis::Alfred.setex("evo1967:reconcile_cooldown:#{channel.id}", '1', RECONCILE_COOLDOWN_SECONDS)
   rescue StandardError
     nil
+  end
+
+  # Evolution Go: GET /instance/status com o token da instância responde
+  # {"data":{"Connected":true,"LoggedIn":true,...}}.
+  def reconcile_evolution_go_state!(channel, config)
+    api_url = config['api_url'].presence
+    token = config['instance_token'].presence
+    return false if api_url.blank? || token.blank?
+
+    unless evolution_go_logged_in?(api_url, token)
+      set_reconcile_cooldown!(channel)
+      return false
+    end
+
+    channel.mark_connected!
+    true
+  end
+
+  def evolution_go_logged_in?(api_url, token)
+    uri = URI.parse("#{api_url.chomp('/')}/instance/status")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = (uri.scheme == 'https')
+    http.open_timeout = 2
+    http.read_timeout = 2
+    request = Net::HTTP::Get.new(uri)
+    request['apikey'] = token
+    response = http.request(request)
+    return false unless response.is_a?(Net::HTTPSuccess)
+
+    data = JSON.parse(response.body)['data'] || {}
+    data['Connected'] == true && data['LoggedIn'] == true
+  rescue StandardError => e
+    Rails.logger.warn "EVO-1967: Evolution Go status check failed: #{e.message}"
+    false
   end
 
   def evolution_connection_state(api_url, instance_name, apikey)

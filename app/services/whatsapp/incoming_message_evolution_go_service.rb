@@ -22,6 +22,8 @@ class Whatsapp::IncomingMessageEvolutionGoService < Whatsapp::IncomingMessageBas
       process_pair_success
     when 'LoggedOut'
       process_logged_out
+    when 'Connected'
+      process_connected
     else
       Rails.logger.warn "Evolution Go API: Unhandled event type: #{event_type}"
     end
@@ -157,6 +159,20 @@ class Whatsapp::IncomingMessageEvolutionGoService < Whatsapp::IncomingMessageBas
   rescue StandardError => e
     Rails.logger.error "Evolution Go API: Failed to process PairSuccess: #{e.message}"
     Rails.logger.error "Evolution Go API: Backtrace: #{e.backtrace.first(5).join("\n")}"
+  end
+
+  # A sessão restaurada (reconexão ou re-pareamento sem PairSuccess entregue) emite
+  # só Connected. Sem isso, um LoggedOut antigo deixa o canal preso em
+  # "reautorizar" e o painel fica reconectando mesmo com a instância no ar.
+  def process_connected
+    channel = inbox.channel
+    return if !channel.reauthorization_required? && channel.provider_connection.is_a?(Hash) &&
+              channel.provider_connection['connection'] == 'open'
+
+    Rails.logger.info "Evolution Go API: Connected event - clearing stale state for channel #{channel.id}"
+    channel.mark_connected!
+  rescue StandardError => e
+    Rails.logger.error "Evolution Go API: Failed to process Connected: #{e.message}"
   end
 
   def process_logged_out

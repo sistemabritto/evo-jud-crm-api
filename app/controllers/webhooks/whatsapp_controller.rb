@@ -35,9 +35,10 @@ class Webhooks::WhatsappController < ActionController::API
   private
 
   def valid_evolution_go_payload?
-    # Evolution Go webhook must have: event, data, instanceId, instanceToken
+    # Evolution Go webhook must have: event, instanceId, instanceToken. `data` vem
+    # vazio em eventos de ciclo de vida (Disconnected); exigir data gerava 400 e
+    # 5 retentativas inúteis do Evolution a cada queda.
     params[:event].present? &&
-      params[:data].present? &&
       params[:instanceId].present? &&
       params[:instanceToken].present?
   end
